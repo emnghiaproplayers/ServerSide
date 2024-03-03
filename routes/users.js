@@ -1,89 +1,32 @@
 var express = require("express");
-var router = express.Router();
-var passport = require("passport");
-const bodyParser = require("body-parser");
+var router = express.Router(); // Tạo một đối tượng router để xử lý các tuyến đường liên quan đến người dùng.
+const bodyParser = require("body-parser"); // Middleware để phân tích các yêu cầu HTTP và truy cập dữ liệu được gửi đến từ form.
 var User = require("../models/user");
-
+// update passport
+var passport = require("passport");
+// JWT
+var authenticate = require("../authenticate");
+const user = require("../models/user");
+const { verify } = require("jsonwebtoken");
+// Sử dụng bodyParser
 router.use(bodyParser.json());
 
-/* GET users listing. */
-router.get("/", function (req, res, next) {
-  res.send("respond with a resource");
+router.get("/", authenticate.verifyAdmin, authenticate.verifyUser, (req, res) => {
+  User.find({})
+    .then(
+      (user) => {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/plain");
+        res.json(user);
+      },
+      (err) => next(err)
+    )
+    .catch((err) => next(err));
 });
-
-// sign up default
-
-// router.post("/signup", (req, res, next) => {
-//   User.findOne({ username: req.body.username })
-//     .then((user) => {
-//       if (user != null) {
-//         var err = new Error("User " + req.body.username + " already exists!");
-//         err.status = 403;
-//         next(err);
-//       } else {
-//         return User.create({
-//           username: req.body.username,
-//           password: req.body.password,
-//         });
-//       }
-//     })
-//     .then(
-//       (user) => {
-//         res.statusCode = 200;
-//         res.setHeader("Content-Type", "application/json");
-//         res.json({ status: "Registration Successful!", user: user });
-//       },
-//       (err) => next(err)
-//     )
-//     .catch((err) => next(err));
-// });
-
-// router.post("/login", (req, res, next) => {
-//   if (!req.session.user) {
-//     var authHeader = req.headers.authorization;
-
-//     if (!authHeader) {
-//       var err = new Error("You are not authenticated!");
-//       res.setHeader("WWW-Authenticate", "Basic");
-//       err.status = 401;
-//       return next(err);
-//     }
-
-//     var auth = new Buffer.from(authHeader.split(" ")[1], "base64")
-//       .toString()
-//       .split(":");
-//     var username = auth[0];
-//     var password = auth[1];
-
-//     User.findOne({ username: username })
-//       .then((user) => {
-//         if (user === null) {
-//           var err = new Error("User " + username + " does not exist!");
-//           err.status = 403;
-//           return next(err);
-//         } else if (user.password !== password) {
-//           var err = new Error("Your password is incorrect!");
-//           err.status = 403;
-//           return next(err);
-//         } else if (user.username === username && user.password === password) {
-//           req.session.user = "authenticated";
-//           res.statusCode = 200;
-//           res.setHeader("Content-Type", "text/plain");
-//           res.end("You are authenticated!");
-//         }
-//       })
-//       .catch((err) => next(err));
-//   } else {
-//     res.statusCode = 200;
-//     res.setHeader("Content-Type", "text/plain");
-//     res.end("You are already authenticated!");
-//   }
-// });
-
-//sign up using passport
 router.post("/signup", (req, res, next) => {
+  //sử dụng passport để xác thực
   User.register(
-    new User({ username: req.body.username }),
+    new User({ username: req.body.username, admin : req.body.admin || false}),
     req.body.password,
     (err, user) => {
       if (err) {
@@ -91,20 +34,49 @@ router.post("/signup", (req, res, next) => {
         res.setHeader("Content-Type", "application/json");
         res.json({ err: err });
       } else {
-        passport.authenticate("local")(req, res, () => {
-          res.statusCode = 200;
-          res.setHeader("Content-Type", "application/json");
-          res.json({ success: true, status: "Registration Successful!" });
-        });
+        if (req.body.firstname) user.firstname = req.body.firstname;
+        if (req.body.lastname) user.lastname = req.body.lastname;
+        user
+          .save()
+          .then((user) => {
+            passport.authenticate("local")(req, res, () => {
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/json");
+              res.json({ success: true, status: "Registration Successful!" });
+            });
+          })
+          .catch((err) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.json({ err: err });
+          });
       }
     }
   );
 });
-
+router.get("/:userId", (req, res) => {
+  User.findById(req.user._id)
+    .then((user) => {
+      if (user) {
+        res.status(200).json(user);
+      } else {
+        res.status(404).json({ message: "User not found" });
+      }
+    })
+    .catch((err) => {
+      console.error("Error finding user:", err);
+      res.status(500).json({ error: "Internal Server Error" });
+    });
+});
 router.post("/login", passport.authenticate("local"), (req, res) => {
+  var token = authenticate.getToken({ _id: req.user._id });
   res.statusCode = 200;
   res.setHeader("Content-Type", "application/json");
-  res.json({ success: true, status: "You are successfully logged in!" });
+  res.json({
+    success: true,
+    token: token,
+    status: "You are successfully logged in!",
+  });
 });
 
 router.get("/logout", (req, res) => {
